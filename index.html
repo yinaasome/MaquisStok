@@ -6,7 +6,8 @@
 <title>Maquis Gestion Pro</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<!-- SheetJS pour export XLSX -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root {
     --primary: #1a1a2e; --secondary: #16213e; --accent: #e94560; --accent-light: #ff6b6b;
@@ -226,6 +227,31 @@
   .btn-toggle-rapport { width:100%; background:linear-gradient(135deg,var(--blue) 0%,#2980b9 100%); color:white; border:none; border-radius:12px; padding:14px; font-size:0.95rem; font-weight:700; cursor:pointer; margin-bottom:16px; transition:all 0.2s; }
   .btn-pdf { width:100%; background:linear-gradient(135deg,#c0392b 0%,#e74c3c 100%); color:white; border:none; border-radius:12px; padding:16px; font-size:0.95rem; font-weight:700; cursor:pointer; margin-top:10px; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 4px 15px rgba(231,76,60,0.4); transition:transform 0.15s; }
   .btn-pdf:active { transform:scale(0.97); }
+
+  /* ===== BOUTON XLSX — vert Excel ===== */
+  .btn-xlsx {
+    width:100%;
+    background:linear-gradient(135deg,#1D6F42 0%,#217346 100%);
+    color:white;
+    border:none;
+    border-radius:12px;
+    padding:16px;
+    font-size:0.95rem;
+    font-weight:700;
+    cursor:pointer;
+    margin-top:10px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    box-shadow:0 4px 15px rgba(29,111,66,0.5);
+    transition:transform 0.15s;
+    font-family:'DM Sans',sans-serif;
+    letter-spacing:0.3px;
+  }
+  .btn-xlsx:active { transform:scale(0.97); }
+  .btn-xlsx:hover { filter:brightness(1.1); }
+
   .btn-toggle-rapport:active { transform:scale(0.98); }
   .top-item { display:flex; align-items:center; gap:12px; background:rgba(255,255,255,0.05); border-radius:12px; padding:12px; margin-bottom:8px; }
   .top-rank { width:28px; height:28px; background:var(--accent); border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.9rem; }
@@ -240,7 +266,6 @@
   @keyframes spin { to{transform:rotate(360deg)} }
   #loadingOverlay p { color:var(--cream); font-size:0.95rem; font-weight:600; }
 </style>
-<base target="_blank">
 </head>
 <body>
 
@@ -358,7 +383,7 @@
     </div>
     <div class="form-row"><label>Seuil d'alerte stock</label><input type="number" id="prodAlerte" placeholder="Ex: 6" min="0" value="6"></div>
     <div class="form-row">
-      <label>Image du produit (facultatif)</label>
+      <label>Image du produit</label>
       <input type="file" id="prodImage" accept="image/*" onchange="previewImage(this)">
       <div id="imagePreview" style="margin-top:10px;display:none;"><img src="" style="width:80px;height:80px;object-fit:contain;border-radius:10px;background:rgba(255,255,255,0.1);padding:5px;"></div>
     </div>
@@ -415,7 +440,11 @@
   <div id="rapportDetailleSection" style="display:none;">
     <div class="section-title">📋 Rapport Détaillé du Jour</div>
     <div id="rapportDetailleContent" style="overflow-x:auto;"></div>
-    <button class="btn-pdf" onclick="downloadRapportXLSX()">⬇️ Télécharger le rapport en Excel (XLSX)</button>
+    <!-- BOUTON XLSX (nouveau — remplace le PDF qui était vide) -->
+    <button class="btn-xlsx" onclick="downloadRapportXLSX()">
+      📊 Télécharger le rapport en Excel (.xlsx)
+    </button>
+    <button class="btn-pdf" onclick="downloadRapportPDF()">⬇️ Télécharger le rapport en PDF</button>
   </div>
   <div class="whatsapp-section">
     <div class="section-title">📤 Envoyer le rapport</div>
@@ -517,22 +546,19 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db  = getFirestore(app);
 
-// Collections Firestore
 const COL = {
   produits:     'produits',
-  ventes:       'ventes',       // chaque doc = une vente entière (avec items[])
+  ventes:       'ventes',
   depenses:     'depenses',
   stockHistory: 'stockHistory'
 };
-
-
 
 // =====================================================================
 // VARIABLES GLOBALES
 // =====================================================================
 let produits     = [];
-let ventesRaw    = [];   // lignes brutes depuis Google Sheets
-let ventes       = [];   // groupées par venteId pour l'affichage
+let ventesRaw    = [];
+let ventes       = [];
 let depenses     = [];
 let stockHistory = [];
 let cart         = {};
@@ -573,7 +599,6 @@ function hideLoading() { document.getElementById('loadingOverlay').style.display
 // =====================================================================
 // FIREBASE FIRESTORE — LECTURE / ÉCRITURE
 // =====================================================================
-
 async function fbGetAll(colName) {
   const snap = await getDocs(collection(db, colName));
   return snap.docs.map(d => ({ _fbId: d.id, ...d.data() }));
@@ -591,7 +616,6 @@ async function loadAllData() {
       fbGetAll(COL.stockHistory).catch(() => [])
     ]);
 
-    // ── PRODUITS ──────────────────────────────────────────────────────
     produits = pDocs.map(p => ({
       id:        p.id       || p._fbId,
       nom:       p.nom      || '',
@@ -603,15 +627,8 @@ async function loadAllData() {
       image:     p.image    || ''
     }));
 
-    // ── VENTES ───────────────────────────────────────────────────────
-    // Supporte 3 formats :
-    //  1) Nouveau Firebase : { id, date, heure, total, items:[] }
-    //  2) Ancien plat Sheets migré : { venteId, prodId, quantite, total, ... }
-    //  3) Doc plat avec items vide ou absent
     const venteMap = {};
-
     vDocs.forEach(v => {
-      // Format 1 : nouveau format propre
       if (Array.isArray(v.items) && v.items.length > 0) {
         const vid = v.id || v._fbId;
         if (!venteMap[vid]) {
@@ -630,8 +647,6 @@ async function loadAllData() {
         }
         return;
       }
-
-      // Format 2 : ancienne ligne plate (venteId présent)
       if (v.venteId) {
         const vid = v.venteId;
         if (!venteMap[vid]) {
@@ -650,22 +665,15 @@ async function loadAllData() {
         }
         return;
       }
-
-      // Format 3 : doc avec id mais sans items (on ignore)
     });
 
-    // Recalculer le total depuis les items pour éviter les doublons
     ventes = Object.values(venteMap).map(v => {
-      // Si total semble corrompu (beaucoup trop grand), le recalculer
       const calculatedTotal = v.items.reduce((s,i) => s + i.prix * i.qty, 0);
-      const finalTotal = (v.total > 0 && v.total <= calculatedTotal * 2)
-        ? v.total
-        : calculatedTotal;
+      const finalTotal = (v.total > 0 && v.total <= calculatedTotal * 2) ? v.total : calculatedTotal;
       return { ...v, total: finalTotal };
     });
     ventesRaw = ventes;
 
-    // ── DÉPENSES ─────────────────────────────────────────────────────
     depenses = dDocs.map(d => ({
       id:        d.id        || d._fbId,
       categorie: d.categorie || 'Autre',
@@ -674,7 +682,6 @@ async function loadAllData() {
       date:      d.date      || todayStr()
     }));
 
-    // ── STOCK HISTORY ─────────────────────────────────────────────────
     stockHistory = hDocs.map(h => ({
       date:         h.date         || '',
       prodId:       h.prodId       || '',
@@ -700,7 +707,6 @@ async function apiAddProduit(produit) {
   const { _fbId, ...data } = produit;
   await setDoc(doc(db, COL.produits, produit.id), data);
 }
-
 async function apiUpdateProduit() {
   const batch = writeBatch(db);
   produits.forEach(p => {
@@ -709,7 +715,6 @@ async function apiUpdateProduit() {
   });
   await batch.commit();
 }
-
 async function apiDeleteProduit(id) {
   await deleteDoc(doc(db, COL.produits, id));
 }
@@ -739,7 +744,6 @@ async function apiUpdateStockHistory() {
 async function apiAddDepense(dep) {
   await setDoc(doc(db, COL.depenses, dep.id), dep);
 }
-
 async function apiDeleteDepense(id) {
   await deleteDoc(doc(db, COL.depenses, id));
 }
@@ -794,28 +798,16 @@ async function validateSale() {
   });
   const total = cartTotal();
 
-  // Mise à jour locale du stock et stockHistory
   items.forEach(item => {
     const idx = produits.findIndex(p=>p.id===item.prodId);
     if (idx === -1) return;
     const stockAvant = produits[idx].stock;
     produits[idx].stock = Math.max(0, stockAvant - item.qty);
-
-    // StockHistory
     let entry = stockHistory.find(h => h.date===date && h.prodId===item.prodId);
-    if (entry) {
-      entry.ventes = String(Number(entry.ventes) + item.qty);
-    } else {
-      stockHistory.push({
-        date, prodId: item.prodId,
-        stockInitial: String(stockAvant),
-        entrees: '0',
-        ventes: String(item.qty)
-      });
-    }
+    if (entry) { entry.ventes = String(Number(entry.ventes) + item.qty); }
+    else { stockHistory.push({ date, prodId: item.prodId, stockInitial: String(stockAvant), entrees: '0', ventes: String(item.qty) }); }
   });
 
-  // Mise à jour locale des ventes
   const newVente = { id:venteId, date, heure, total, items };
   ventes.push(newVente);
   ventesRaw = ventes;
@@ -826,7 +818,6 @@ async function validateSale() {
   showToast(`✅ Vente de ${total.toLocaleString('fr')} F enregistrée`);
   closeCart();
 
-  // Écriture asynchrone Firebase
   try {
     await Promise.all([
       apiAddVente(venteId, date, heure, items, total),
@@ -884,8 +875,7 @@ async function addProduit() {
   const caisseQty = parseInt(document.getElementById('prodTaille').value);
   const alerte    = parseInt(document.getElementById('prodAlerte').value) || 6;
   if (!nom || !prix || prix <= 0) { showToast('⚠️ Nom et prix requis'); return; }
-  // Image facultative - utilise l'image par défaut de la catégorie si aucune image n'est fournie
-  const image = tempImageData || defaultImages[cat] || defaultImages['biere'] || 'images/image1.jpeg';
+  const image = tempImageData || defaultImages[cat] || 'images/image1.jpeg';
   const produit = { id: uid(), nom, categorie:cat, prix, stock, caisseQty, alerte, image };
   produits.push(produit);
   refreshProduits(); refreshVente();
@@ -983,13 +973,10 @@ async function addStock() {
   if (document.querySelector('.caisse-option.active').textContent==='Autre') selectedCaisseQty=parseInt(document.getElementById('customCaisseQty').value)||1;
   const qty = nb * selectedCaisseQty;
   const newStock = currentStockProduct.stock + qty;
-
-  // Mise à jour stockHistory
   const today = todayStr();
   let entry = stockHistory.find(h=>h.date===today && h.prodId===currentStockProduct.id);
   if (entry) { entry.entrees = String(Number(entry.entrees)+qty); }
   else { stockHistory.push({ date:today, prodId:currentStockProduct.id, stockInitial:String(currentStockProduct.stock), entrees:String(qty), ventes:'0' }); }
-
   currentStockProduct.stock = newStock;
   const idx = produits.findIndex(p=>p.id===currentStockProduct.id);
   if (idx!==-1) produits[idx].stock = newStock;
@@ -1105,13 +1092,11 @@ function refreshDashboard() {
   benEl.style.color  = ben>=0?'var(--green)':'var(--red)';
   document.getElementById('kpi-produits').textContent = totalU;
 
-  // Alertes
   const alerts = produits.filter(p=>p.stock<=p.alerte);
   const alertsDiv = document.getElementById('stockAlerts');
   if (alerts.length===0) alertsDiv.innerHTML='<div class="empty-state" style="padding:20px;"><div class="es-text">✅ Aucune alerte</div></div>';
   else alertsDiv.innerHTML = alerts.map(p=>`<div class="alert-card ${p.stock<=p.alerte/2?'':'warning'}"><span class="alert-icon">${p.stock<=p.alerte/2?'🔴':'🟡'}</span><div class="alert-text"><strong>${p.nom}</strong><span class="alert-qty">Stock: ${p.stock} / Alerte: ${p.alerte}</span></div></div>`).join('');
 
-  // Top ventes
   const counts={};
   todayV.forEach(v=>v.items.forEach(i=>{ counts[i.nom]=(counts[i.nom]||0)+i.qty; }));
   const sorted=Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -1119,7 +1104,6 @@ function refreshDashboard() {
   if (sorted.length===0) topEl.innerHTML='<div class="empty-state"><div class="es-icon">📊</div><div class="es-text">Aucune vente encore</div></div>';
   else topEl.innerHTML=sorted.map(([nom,qty],i)=>`<div class="top-item"><div class="top-rank ${i===0?'r1':''}">${i+1}</div><div class="top-name">${nom}</div><div class="top-val">×${qty}</div></div>`).join('');
 
-  // Graphique semaine
   const days=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
   const now2=new Date(); const weekData=[];
   for (let i=6;i>=0;i--) { const dt=new Date(now2); dt.setDate(now2.getDate()-i); const ds=dt.toISOString().split('T')[0]; weekData.push({label:days[dt.getDay()],total:ventes.filter(v=>v.date===ds).reduce((s,v)=>s+v.total,0),isToday:i===0}); }
@@ -1150,12 +1134,10 @@ function refreshRapports() {
   benJEl.textContent=benJ.toLocaleString('fr')+' F'; benJEl.style.color=benJ>=0?'var(--green)':'var(--red)';
   document.getElementById('rs-tx-j').textContent = todayV.length;
 
-  // Historique jour — groupé par venteId
   const vhDiv = document.getElementById('vh-jour');
   if (todayV.length===0) vhDiv.innerHTML='<div class="empty-state"><div class="es-text">Aucune vente</div></div>';
   else vhDiv.innerHTML=todayV.slice().reverse().map(v=>`<div class="vh-item"><div class="vh-time">${v.heure}</div><div class="vh-items"><div class="vh-names">${v.items.map(i=>i.nom+(i.qty>1?` ×${i.qty}`:'')).join(', ')}</div></div><div class="vh-total">+${v.total.toLocaleString('fr')} F</div></div>`).join('');
 
-  // Semaine
   const now=new Date(); const weekDates=[];
   for (let i=6;i>=0;i--) { const dt=new Date(now); dt.setDate(now.getDate()-i); weekDates.push(dt.toISOString().split('T')[0]); }
   const wv=ventes.filter(v=>weekDates.includes(v.date)), wd=depenses.filter(x=>weekDates.includes(x.date));
@@ -1170,7 +1152,6 @@ function refreshRapports() {
   const wmax=Math.max(...wbars.map(x=>x.total),1);
   document.getElementById('rapport-semaine-bars').innerHTML='<div class="stat-bar-list">'+wbars.map(x=>`<div class="stat-bar-item"><div class="stat-bar-header"><span>${x.label}</span><span class="sbi-val">${x.total.toLocaleString('fr')} F</span></div><div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(x.total/wmax*100)}%"></div></div></div>`).join('')+'</div>';
 
-  // Mois
   const nowM=now.toISOString().slice(0,7);
   const mv=ventes.filter(v=>v.date.startsWith(nowM)), md=depenses.filter(x=>x.date.startsWith(nowM));
   const mrv=mv.reduce((s,v)=>s+v.total,0), mrd=md.reduce((s,x)=>s+x.montant,0);
@@ -1185,6 +1166,7 @@ function refreshRapports() {
   const mmax=mSorted.length?mSorted[0][1]:1;
   document.getElementById('rapport-mois-top').innerHTML=mSorted.length?mSorted.map(([nom,qty])=>`<div class="stat-bar-item"><div class="stat-bar-header"><span>${nom}</span><span class="sbi-val">×${qty}</span></div><div class="stat-bar-track"><div class="stat-bar-fill" style="width:${Math.round(qty/mmax*100)}%"></div></div></div>`).join(''):'<div class="empty-state"><div class="es-text">Aucune vente</div></div>';
 }
+
 function toggleRapportDetaille() {
   const s=document.getElementById('rapportDetailleSection');
   if (s.style.display==='none') { s.style.display='block'; generateRapportDetaille(); } else s.style.display='none';
@@ -1205,6 +1187,133 @@ function generateRapportDetaille() {
   });
   html+=`<tr class="total-row"><td>TOTAL</td><td>-</td><td>-</td><td>-</td><td>${totalV}</td><td>-</td><td>${totalM.toLocaleString('fr')} F</td></tr></tbody></table>`;
   document.getElementById('rapportDetailleContent').innerHTML=html;
+}
+
+// =====================================================================
+// ✅ NOUVEAU : TÉLÉCHARGEMENT XLSX VIA SheetJS
+// =====================================================================
+function downloadRapportXLSX() {
+  try {
+    showToast('⏳ Génération du fichier Excel...');
+    const today    = todayStr();
+    const dateStr  = new Date().toLocaleDateString('fr-FR');
+    const todayV   = ventes.filter(v => v.date === today);
+    const todayD   = depenses.filter(x => x.date === today);
+    const rv       = todayV.reduce((s, v) => s + v.total, 0);
+    const rd       = todayD.reduce((s, x) => s + x.montant, 0);
+    const ben      = rv - rd;
+
+    const wb = XLSX.utils.book_new();
+
+    // ── FEUILLE 1 : Résumé ──────────────────────────────────────────
+    const resumeData = [
+      ['MAQUIS PRO — Rapport du ' + dateStr],
+      [],
+      ['RÉSUMÉ FINANCIER'],
+      ['Indicateur', 'Montant (FCFA)'],
+      ['Chiffre d\'affaires', rv],
+      ['Total Dépenses', rd],
+      ['Bénéfice Net', ben],
+      [],
+      ['STATISTIQUES'],
+      ['Indicateur', 'Valeur'],
+      ['Nombre de transactions', todayV.length],
+      ['Unités vendues', todayV.reduce((s,v)=>s+v.items.reduce((ss,i)=>ss+i.qty,0),0)],
+      ['Nombre de dépenses', todayD.length],
+      [],
+      ['DÉPENSES DU JOUR'],
+      ['Catégorie', 'Description', 'Montant (FCFA)'],
+      ...todayD.map(d => [d.categorie, d.note, d.montant]),
+      todayD.length === 0 ? ['Aucune dépense enregistrée', '', ''] : null,
+    ].filter(Boolean);
+
+    const wsResume = XLSX.utils.aoa_to_sheet(resumeData);
+
+    // Largeurs colonnes feuille résumé
+    wsResume['!cols'] = [{ wch: 35 }, { wch: 20 }, { wch: 20 }];
+
+    // Style titre principal (A1)
+    if (wsResume['A1']) {
+      wsResume['A1'].s = { font: { bold: true, sz: 14 }, fill: { fgColor: { rgb: '1A1A2E' } } };
+    }
+
+    XLSX.utils.book_append_sheet(wb, wsResume, 'Résumé');
+
+    // ── FEUILLE 2 : Détail par produit ───────────────────────────────
+    const header = [
+      'Produit',
+      'Catégorie',
+      'Prix unitaire (FCFA)',
+      'Stock Initial',
+      'Entrées',
+      'Stock Théorique',
+      'Quantité Vendue',
+      'Stock Final',
+      'Montant (FCFA)'
+    ];
+
+    let totalVendu = 0, totalMontant = 0;
+    const detailRows = produits.map(prod => {
+      const hist      = stockHistory.find(h => h.date === today && h.prodId === prod.id);
+      const stockInit = hist ? Number(hist.stockInitial) : prod.stock;
+      const entrees   = hist ? Number(hist.entrees) : 0;
+      const vendu     = todayV.reduce((s, v) =>
+        s + v.items.filter(i => i.prodId === prod.id).reduce((ss, ii) => ss + ii.qty, 0), 0);
+      const montant = vendu * prod.prix;
+      totalVendu  += vendu;
+      totalMontant += montant;
+      return [
+        prod.nom,
+        prod.categorie,
+        prod.prix,
+        stockInit,
+        entrees,
+        stockInit + entrees,
+        vendu,
+        prod.stock,
+        montant
+      ];
+    });
+
+    // Ligne de total
+    const totalRow = ['TOTAL', '', '', '', '', '', totalVendu, '', totalMontant];
+
+    const detailData = [header, ...detailRows, [], totalRow];
+    const wsDetail = XLSX.utils.aoa_to_sheet(detailData);
+
+    // Largeurs colonnes feuille détail
+    wsDetail['!cols'] = [
+      { wch: 25 }, { wch: 14 }, { wch: 22 },
+      { wch: 14 }, { wch: 10 }, { wch: 18 },
+      { wch: 18 }, { wch: 12 }, { wch: 18 }
+    ];
+
+    XLSX.utils.book_append_sheet(wb, wsDetail, 'Détail Produits');
+
+    // ── FEUILLE 3 : Historique des ventes du jour ────────────────────
+    const ventesHeader = ['Heure', 'Produits', 'Quantités', 'Total (FCFA)'];
+    const ventesRows = todayV.slice().reverse().map(v => [
+      v.heure,
+      v.items.map(i => i.nom).join(', '),
+      v.items.map(i => i.qty).join(', '),
+      v.total
+    ]);
+
+    const ventesData = [ventesHeader, ...ventesRows];
+    if (ventesRows.length === 0) ventesData.push(['Aucune vente enregistrée', '', '', '']);
+
+    const wsVentes = XLSX.utils.aoa_to_sheet(ventesData);
+    wsVentes['!cols'] = [{ wch: 10 }, { wch: 40 }, { wch: 20 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, wsVentes, 'Historique Ventes');
+
+    // ── Téléchargement ───────────────────────────────────────────────
+    const filename = `Rapport_MaquisPro_${today}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    showToast('✅ Fichier Excel téléchargé !');
+  } catch (err) {
+    console.error('XLSX error:', err);
+    showToast('❌ Erreur Excel: ' + err.message);
+  }
 }
 
 // =====================================================================
@@ -1249,9 +1358,9 @@ function printFiche() {
 }
 
 // =====================================================================
-// TÉLÉCHARGEMENT PDF DU RAPPORT DÉTAILLÉ
+// PDF (conservé — peut fonctionner selon l'appareil)
 // =====================================================================
-function downloadRapportXLSX() {
+function downloadRapportPDF() {
   const today = todayStr();
   const todayStr2 = new Date().toLocaleDateString('fr-FR');
   const todayV = ventes.filter(v => v.date === today);
@@ -1260,86 +1369,94 @@ function downloadRapportXLSX() {
   const rd = todayD.reduce((s,x) => s+x.montant, 0);
   const ben = rv - rd;
 
-  // Créer le workbook
-  const wb = XLSX.utils.book_new();
-
-  // === FEUILLE 1: RAPPORT JOURNALIER ===
-  const summaryData = [
-    ['🍻 MAQUIS PRO - Rapport Journalier'],
-    ['Date:', todayStr2],
-    [],
-    ['RÉSUMÉ FINANCIER'],
-    ['Chiffre d'affaires', rv, 'FCFA'],
-    ['Dépenses', rd, 'FCFA'],
-    ['Bénéfice Net', ben, 'FCFA'],
-    [],
-    ['DÉTAIL PAR PRODUIT'],
-    ['Produit', 'Stock Initial', 'Entrées', 'Stock Théorique', 'Vendu', 'Stock Final', 'Prix Unitaire', 'Montant Vente']
-  ];
-
+  let rows = '';
   let totalV = 0, totalM = 0;
   produits.forEach(prod => {
     const hist = stockHistory.find(h => h.date === today && h.prodId === prod.id);
     const stockInit = hist ? Number(hist.stockInitial) : prod.stock;
-    const entrees = hist ? Number(hist.entrees) : 0;
+    const entrees   = hist ? Number(hist.entrees) : 0;
     const vendu = todayV.reduce((s,v) => s + v.items.filter(i=>i.prodId===prod.id).reduce((ss,ii)=>ss+ii.qty,0), 0);
     const montant = vendu * prod.prix;
-    totalV += vendu; 
-    totalM += montant;
-
-    summaryData.push([
-      prod.nom,
-      stockInit,
-      entrees,
-      stockInit + entrees,
-      vendu,
-      prod.stock,
-      prod.prix,
-      montant
-    ]);
+    totalV += vendu; totalM += montant;
+    rows += `<tr>
+      <td style="text-align:left;font-weight:600;padding:8px;">${prod.nom}</td>
+      <td>${stockInit}</td>
+      <td style="color:#27ae60">+${entrees}</td>
+      <td>${stockInit + entrees}</td>
+      <td style="color:#e74c3c">-${vendu}</td>
+      <td style="font-weight:700">${prod.stock}</td>
+      <td style="font-weight:700">${montant.toLocaleString('fr')} F</td>
+    </tr>`;
   });
 
-  // Ligne totaux
-  summaryData.push(['TOTAL', '', '', '', totalV, '', '', totalM]);
+  const pdfContent = `
+    <div style="font-family:'DM Sans',Arial,sans-serif;padding:24px;background:white;color:#333;max-width:800px;margin:0 auto;">
+      <div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);color:white;padding:28px 24px;border-radius:12px;text-align:center;margin-bottom:24px;">
+        <div style="font-size:2rem;font-weight:900;color:#ffd700;letter-spacing:2px;">MAQUIS PRO</div>
+        <div style="margin-top:8px;font-size:0.9rem;opacity:0.85;">Rapport Détaillé du ${todayStr2}</div>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:24px;">
+        <div style="flex:1;background:#f0fff4;border:1px solid #2ecc71;border-radius:10px;padding:14px;text-align:center;">
+          <div style="font-size:0.7rem;text-transform:uppercase;color:#666;margin-bottom:4px;">Chiffre d'affaires</div>
+          <div style="font-size:1.4rem;font-weight:700;color:#27ae60;">${rv.toLocaleString('fr')} F</div>
+        </div>
+        <div style="flex:1;background:#fff5f5;border:1px solid #e74c3c;border-radius:10px;padding:14px;text-align:center;">
+          <div style="font-size:0.7rem;text-transform:uppercase;color:#666;margin-bottom:4px;">Dépenses</div>
+          <div style="font-size:1.4rem;font-weight:700;color:#e74c3c;">${rd.toLocaleString('fr')} F</div>
+        </div>
+        <div style="flex:1;background:${ben>=0?'#f0fff4':'#fff5f5'};border:1px solid ${ben>=0?'#2ecc71':'#e74c3c'};border-radius:10px;padding:14px;text-align:center;">
+          <div style="font-size:0.7rem;text-transform:uppercase;color:#666;margin-bottom:4px;">Bénéfice Net</div>
+          <div style="font-size:1.4rem;font-weight:700;color:${ben>=0?'#27ae60':'#e74c3c'};">${ben.toLocaleString('fr')} F</div>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+        <thead>
+          <tr style="background:#1a1a2e;color:white;">
+            <th style="padding:10px 8px;text-align:left;">Produit</th>
+            <th style="padding:10px 8px;">Stock Init.</th>
+            <th style="padding:10px 8px;">Entrées</th>
+            <th style="padding:10px 8px;">Théorique</th>
+            <th style="padding:10px 8px;">Vendu</th>
+            <th style="padding:10px 8px;">Stock Final</th>
+            <th style="padding:10px 8px;">Montant</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr style="background:#1a1a2e;color:white;font-weight:700;">
+            <td style="padding:10px 8px;">TOTAL</td>
+            <td>-</td><td>-</td><td>-</td>
+            <td style="padding:10px 8px;">${totalV}</td>
+            <td>-</td>
+            <td style="padding:10px 8px;">${totalM.toLocaleString('fr')} F</td>
+          </tr>
+        </tfoot>
+      </table>
+      <div style="margin-top:24px;text-align:center;font-size:0.7rem;color:#aaa;border-top:1px dashed #ddd;padding-top:12px;">
+        Généré par Maquis Pro — ${todayStr2}
+      </div>
+    </div>`;
 
-  const ws1 = XLSX.utils.aoa_to_sheet(summaryData);
+  const container = document.createElement('div');
+  container.innerHTML = pdfContent;
+  document.body.appendChild(container);
 
-  // Largeurs de colonnes
-  ws1['!cols'] = [
-    {wch: 20}, {wch: 12}, {wch: 10}, {wch: 14}, 
-    {wch: 10}, {wch: 12}, {wch: 12}, {wch: 14}
-  ];
+  const opt = {
+    margin: [8, 8, 8, 8],
+    filename: `Rapport_MaquisPro_${today}.pdf`,
+    image: { type: 'jpeg', quality: 0.98 },
+    html2canvas: { scale: 2, useCORS: true },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+  };
 
-  XLSX.utils.book_append_sheet(wb, ws1, 'Rapport Journalier');
-
-  // === FEUILLE 2: HISTORIQUE DES VENTES ===
-  const ventesData = [['Heure', 'Produits', 'Quantité', 'Total (FCFA)']];
-  todayV.forEach(v => {
-    const produitsList = v.items.map(i => i.nom).join(', ');
-    const qtyList = v.items.map(i => i.qty).join(', ');
-    ventesData.push([v.heure, produitsList, qtyList, v.total]);
+  showToast('⏳ Génération du PDF...');
+  html2pdf().set(opt).from(container).save().then(() => {
+    document.body.removeChild(container);
+    showToast('✅ PDF téléchargé !');
+  }).catch(err => {
+    document.body.removeChild(container);
+    showToast('❌ Erreur PDF: ' + err.message);
   });
-  ventesData.push(['', '', 'TOTAL', rv]);
-
-  const ws2 = XLSX.utils.aoa_to_sheet(ventesData);
-  ws2['!cols'] = [{wch: 10}, {wch: 40}, {wch: 15}, {wch: 15}];
-  XLSX.utils.book_append_sheet(wb, ws2, 'Historique Ventes');
-
-  // === FEUILLE 3: DÉPENSES ===
-  const depensesData = [['Catégorie', 'Description', 'Montant (FCFA)']];
-  todayD.forEach(d => {
-    depensesData.push([d.categorie, d.note, d.montant]);
-  });
-  depensesData.push(['', 'TOTAL', rd]);
-
-  const ws3 = XLSX.utils.aoa_to_sheet(depensesData);
-  ws3['!cols'] = [{wch: 20}, {wch: 40}, {wch: 15}];
-  XLSX.utils.book_append_sheet(wb, ws3, 'Dépenses');
-
-  // Télécharger
-  showToast('⏳ Génération du fichier Excel...');
-  XLSX.writeFile(wb, `Rapport_MaquisPro_${today}.xlsx`);
-  showToast('✅ Fichier Excel téléchargé !');
 }
 
 // =====================================================================
@@ -1398,6 +1515,7 @@ window.previewImage = previewImage;
 window.switchRapport = switchRapport;
 window.toggleRapportDetaille = toggleRapportDetaille;
 window.downloadRapportXLSX = downloadRapportXLSX;
+window.downloadRapportPDF = downloadRapportPDF;
 window.previewReport = previewReport;
 window.sendViaWhatsApp = sendViaWhatsApp;
 window.savePhoneNumber = savePhoneNumber;
