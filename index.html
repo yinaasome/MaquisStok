@@ -6,6 +6,7 @@
 <title>Maquis Gestion Pro</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
   :root {
     --primary: #1a1a2e; --secondary: #16213e; --accent: #e94560; --accent-light: #ff6b6b;
@@ -239,6 +240,7 @@
   @keyframes spin { to{transform:rotate(360deg)} }
   #loadingOverlay p { color:var(--cream); font-size:0.95rem; font-weight:600; }
 </style>
+<base target="_blank">
 </head>
 <body>
 
@@ -356,7 +358,7 @@
     </div>
     <div class="form-row"><label>Seuil d'alerte stock</label><input type="number" id="prodAlerte" placeholder="Ex: 6" min="0" value="6"></div>
     <div class="form-row">
-      <label>Image du produit</label>
+      <label>Image du produit (facultatif)</label>
       <input type="file" id="prodImage" accept="image/*" onchange="previewImage(this)">
       <div id="imagePreview" style="margin-top:10px;display:none;"><img src="" style="width:80px;height:80px;object-fit:contain;border-radius:10px;background:rgba(255,255,255,0.1);padding:5px;"></div>
     </div>
@@ -413,7 +415,7 @@
   <div id="rapportDetailleSection" style="display:none;">
     <div class="section-title">📋 Rapport Détaillé du Jour</div>
     <div id="rapportDetailleContent" style="overflow-x:auto;"></div>
-    <button class="btn-pdf" onclick="downloadRapportPDF()">⬇️ Télécharger le rapport en PDF</button>
+    <button class="btn-pdf" onclick="downloadRapportXLSX()">⬇️ Télécharger le rapport en Excel (XLSX)</button>
   </div>
   <div class="whatsapp-section">
     <div class="section-title">📤 Envoyer le rapport</div>
@@ -882,7 +884,8 @@ async function addProduit() {
   const caisseQty = parseInt(document.getElementById('prodTaille').value);
   const alerte    = parseInt(document.getElementById('prodAlerte').value) || 6;
   if (!nom || !prix || prix <= 0) { showToast('⚠️ Nom et prix requis'); return; }
-  const image = tempImageData || defaultImages[cat] || 'images/image1.jpeg';
+  // Image facultative - utilise l'image par défaut de la catégorie si aucune image n'est fournie
+  const image = tempImageData || defaultImages[cat] || defaultImages['biere'] || 'images/image1.jpeg';
   const produit = { id: uid(), nom, categorie:cat, prix, stock, caisseQty, alerte, image };
   produits.push(produit);
   refreshProduits(); refreshVente();
@@ -1248,7 +1251,7 @@ function printFiche() {
 // =====================================================================
 // TÉLÉCHARGEMENT PDF DU RAPPORT DÉTAILLÉ
 // =====================================================================
-function downloadRapportPDF() {
+function downloadRapportXLSX() {
   const today = todayStr();
   const todayStr2 = new Date().toLocaleDateString('fr-FR');
   const todayV = ventes.filter(v => v.date === today);
@@ -1257,99 +1260,86 @@ function downloadRapportPDF() {
   const rd = todayD.reduce((s,x) => s+x.montant, 0);
   const ben = rv - rd;
 
-  // Construire le contenu de la table
-  let rows = '';
+  // Créer le workbook
+  const wb = XLSX.utils.book_new();
+
+  // === FEUILLE 1: RAPPORT JOURNALIER ===
+  const summaryData = [
+    ['🍻 MAQUIS PRO - Rapport Journalier'],
+    ['Date:', todayStr2],
+    [],
+    ['RÉSUMÉ FINANCIER'],
+    ['Chiffre d'affaires', rv, 'FCFA'],
+    ['Dépenses', rd, 'FCFA'],
+    ['Bénéfice Net', ben, 'FCFA'],
+    [],
+    ['DÉTAIL PAR PRODUIT'],
+    ['Produit', 'Stock Initial', 'Entrées', 'Stock Théorique', 'Vendu', 'Stock Final', 'Prix Unitaire', 'Montant Vente']
+  ];
+
   let totalV = 0, totalM = 0;
   produits.forEach(prod => {
     const hist = stockHistory.find(h => h.date === today && h.prodId === prod.id);
     const stockInit = hist ? Number(hist.stockInitial) : prod.stock;
-    const entrees   = hist ? Number(hist.entrees) : 0;
+    const entrees = hist ? Number(hist.entrees) : 0;
     const vendu = todayV.reduce((s,v) => s + v.items.filter(i=>i.prodId===prod.id).reduce((ss,ii)=>ss+ii.qty,0), 0);
     const montant = vendu * prod.prix;
-    totalV += vendu; totalM += montant;
-    rows += `<tr>
-      <td style="text-align:left;font-weight:600;padding:8px;">${prod.nom}</td>
-      <td>${stockInit}</td>
-      <td style="color:#27ae60">+${entrees}</td>
-      <td>${stockInit + entrees}</td>
-      <td style="color:#e74c3c">-${vendu}</td>
-      <td style="font-weight:700">${prod.stock}</td>
-      <td style="font-weight:700">${montant.toLocaleString('fr')} F</td>
-    </tr>`;
+    totalV += vendu; 
+    totalM += montant;
+
+    summaryData.push([
+      prod.nom,
+      stockInit,
+      entrees,
+      stockInit + entrees,
+      vendu,
+      prod.stock,
+      prod.prix,
+      montant
+    ]);
   });
 
-  const pdfContent = `
-    <div style="font-family:'DM Sans',Arial,sans-serif;padding:24px;background:white;color:#333;max-width:800px;margin:0 auto;">
-      <div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);color:white;padding:28px 24px;border-radius:12px;text-align:center;margin-bottom:24px;">
-        <div style="font-size:2rem;font-weight:900;color:#ffd700;letter-spacing:2px;">🍻 MAQUIS PRO</div>
-        <div style="margin-top:8px;font-size:0.9rem;opacity:0.85;background:rgba(255,255,255,0.15);border-radius:99px;padding:4px 16px;display:inline-block;">Rapport Détaillé du ${todayStr2}</div>
-      </div>
+  // Ligne totaux
+  summaryData.push(['TOTAL', '', '', '', totalV, '', '', totalM]);
 
-      <div style="display:flex;gap:12px;margin-bottom:24px;">
-        <div style="flex:1;background:#f0fff4;border:1px solid #2ecc71;border-radius:10px;padding:14px;text-align:center;">
-          <div style="font-size:0.7rem;text-transform:uppercase;color:#666;margin-bottom:4px;">Chiffre d'affaires</div>
-          <div style="font-size:1.4rem;font-weight:700;color:#27ae60;">${rv.toLocaleString('fr')} F</div>
-        </div>
-        <div style="flex:1;background:#fff5f5;border:1px solid #e74c3c;border-radius:10px;padding:14px;text-align:center;">
-          <div style="font-size:0.7rem;text-transform:uppercase;color:#666;margin-bottom:4px;">Dépenses</div>
-          <div style="font-size:1.4rem;font-weight:700;color:#e74c3c;">${rd.toLocaleString('fr')} F</div>
-        </div>
-        <div style="flex:1;background:${ben>=0?'#f0fff4':'#fff5f5'};border:1px solid ${ben>=0?'#2ecc71':'#e74c3c'};border-radius:10px;padding:14px;text-align:center;">
-          <div style="font-size:0.7rem;text-transform:uppercase;color:#666;margin-bottom:4px;">Bénéfice Net</div>
-          <div style="font-size:1.4rem;font-weight:700;color:${ben>=0?'#27ae60':'#e74c3c'};">${ben.toLocaleString('fr')} F</div>
-        </div>
-      </div>
+  const ws1 = XLSX.utils.aoa_to_sheet(summaryData);
 
-      <div style="font-size:0.85rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#666;margin-bottom:10px;border-bottom:2px solid #1a1a2e;padding-bottom:6px;">📋 Détail par produit</div>
-      <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
-        <thead>
-          <tr style="background:#1a1a2e;color:white;">
-            <th style="padding:10px 8px;text-align:left;">Produit</th>
-            <th style="padding:10px 8px;">Stock Init.</th>
-            <th style="padding:10px 8px;">Entrées</th>
-            <th style="padding:10px 8px;">Théorique</th>
-            <th style="padding:10px 8px;">Vendu</th>
-            <th style="padding:10px 8px;">Stock Final</th>
-            <th style="padding:10px 8px;">Montant</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-        <tfoot>
-          <tr style="background:#1a1a2e;color:white;font-weight:700;">
-            <td style="padding:10px 8px;">TOTAL</td>
-            <td>-</td><td>-</td><td>-</td>
-            <td style="padding:10px 8px;">${totalV}</td>
-            <td>-</td>
-            <td style="padding:10px 8px;">${totalM.toLocaleString('fr')} F</td>
-          </tr>
-        </tfoot>
-      </table>
+  // Largeurs de colonnes
+  ws1['!cols'] = [
+    {wch: 20}, {wch: 12}, {wch: 10}, {wch: 14}, 
+    {wch: 10}, {wch: 12}, {wch: 12}, {wch: 14}
+  ];
 
-      <div style="margin-top:24px;text-align:center;font-size:0.7rem;color:#aaa;border-top:1px dashed #ddd;padding-top:12px;">
-        Généré par Maquis Pro — ${todayStr2}
-      </div>
-    </div>`;
+  XLSX.utils.book_append_sheet(wb, ws1, 'Rapport Journalier');
 
-  const container = document.createElement('div');
-  container.innerHTML = pdfContent;
-  document.body.appendChild(container);
-
-  const opt = {
-    margin:       [8, 8, 8, 8],
-    filename:     `Rapport_MaquisPro_${today}.pdf`,
-    image:        { type: 'jpeg', quality: 0.98 },
-    html2canvas:  { scale: 2, useCORS: true },
-    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
-  };
-
-  showToast('⏳ Génération du PDF...');
-  html2pdf().set(opt).from(container).save().then(() => {
-    document.body.removeChild(container);
-    showToast('✅ PDF téléchargé !');
-  }).catch(err => {
-    document.body.removeChild(container);
-    showToast('❌ Erreur PDF: ' + err.message);
+  // === FEUILLE 2: HISTORIQUE DES VENTES ===
+  const ventesData = [['Heure', 'Produits', 'Quantité', 'Total (FCFA)']];
+  todayV.forEach(v => {
+    const produitsList = v.items.map(i => i.nom).join(', ');
+    const qtyList = v.items.map(i => i.qty).join(', ');
+    ventesData.push([v.heure, produitsList, qtyList, v.total]);
   });
+  ventesData.push(['', '', 'TOTAL', rv]);
+
+  const ws2 = XLSX.utils.aoa_to_sheet(ventesData);
+  ws2['!cols'] = [{wch: 10}, {wch: 40}, {wch: 15}, {wch: 15}];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Historique Ventes');
+
+  // === FEUILLE 3: DÉPENSES ===
+  const depensesData = [['Catégorie', 'Description', 'Montant (FCFA)']];
+  todayD.forEach(d => {
+    depensesData.push([d.categorie, d.note, d.montant]);
+  });
+  depensesData.push(['', 'TOTAL', rd]);
+
+  const ws3 = XLSX.utils.aoa_to_sheet(depensesData);
+  ws3['!cols'] = [{wch: 20}, {wch: 40}, {wch: 15}];
+  XLSX.utils.book_append_sheet(wb, ws3, 'Dépenses');
+
+  // Télécharger
+  showToast('⏳ Génération du fichier Excel...');
+  XLSX.writeFile(wb, `Rapport_MaquisPro_${today}.xlsx`);
+  showToast('✅ Fichier Excel téléchargé !');
 }
 
 // =====================================================================
@@ -1407,7 +1397,7 @@ window.deleteProduit = deleteProduit;
 window.previewImage = previewImage;
 window.switchRapport = switchRapport;
 window.toggleRapportDetaille = toggleRapportDetaille;
-window.downloadRapportPDF = downloadRapportPDF;
+window.downloadRapportXLSX = downloadRapportXLSX;
 window.previewReport = previewReport;
 window.sendViaWhatsApp = sendViaWhatsApp;
 window.savePhoneNumber = savePhoneNumber;
